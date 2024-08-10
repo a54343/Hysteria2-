@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 脚本名称: configure-iptables.sh
+# 脚本名称: manage-iptables.sh
 
 # 检查是否以 root 用户身份运行
 if [ "$(id -u)" -ne "0" ]; then
@@ -8,45 +8,100 @@ if [ "$(id -u)" -ne "0" ]; then
     exit 1
 fi
 
-# 提示用户输入端口范围和目标端口
-read -p "请输入 UDP 端口范围（格式：20000:50000）： " PORT_RANGE
-read -p "请输入 UDP 目标端口： " TARGET_PORT
+# 配置文件路径
+CONFIG_FILE="/etc/iptables/custom-rules.conf"
 
-# 确保用户输入了端口范围和目标端口
-if [ -z "$PORT_RANGE" ] || [ -z "$TARGET_PORT" ]; then
-    echo "端口范围和目标端口不能为空"
-    exit 1
-fi
+# 安装 iptables-persistent
+install_persistent() {
+    if [ -x "$(command -v apt-get)" ]; then
+        apt-get update
+        apt-get install -y iptables-persistent
+    elif [ -x "$(command -v yum)" ]; then
+        yum install -y iptables-services
+    else
+        echo "不支持的操作系统，请手动安装 iptables-persistent 或 iptables-services"
+        exit 1
+    fi
+}
 
-# 清除现有的 iptables 规则
-iptables -F
-iptables -X
-iptables -t nat -F
-iptables -t nat -X
+# 添加规则
+add_rules() {
+    read -p "请输入 UDP 端口范围（格式：20000:50000）： " PORT_RANGE
+    read -p "请输入 UDP 目标端口： " TARGET_PORT
 
-# 删除现有的 NAT 转发规则
-iptables -t nat -D PREROUTING -p udp --dport $PORT_RANGE -j DNAT --to-destination :$TARGET_PORT 2>/dev/null
+    if [ -z "$PORT_RANGE" ] || [ -z "$TARGET_PORT" ]; then
+        echo "端口范围和目标端口不能为空"
+        exit 1
+    fi
 
-# 删除现有的端口范围规则
-iptables -D INPUT -p udp --dport $PORT_RANGE -j ACCEPT 2>/dev/null
-
-# 设置新的 iptables 规则
-iptables -A INPUT -i lo -j ACCEPT
-iptables -A INPUT -p tcp --dport 22 -j ACCEPT
-iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-iptables -A INPUT -p tcp --dport 443 -j ACCEPT
-iptables -A INPUT -p udp --dport $TARGET_PORT -j ACCEPT
-iptables -A INPUT -p udp --dport $PORT_RANGE -j ACCEPT
-iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-iptables -P INPUT DROP
-iptables -P OUTPUT ACCEPT
-
-# 保存规则
-iptables-save > /etc/iptables/rules.v4
-
-# 设置 NAT 转发规则
-iptables -t nat -A PREROUTING -p udp --dport $PORT_RANGE -j DNAT --to-destination :$TARGET_PORT
+    echo "iptables -A INPUT -p udp --dport $TARGET_PORT -j ACCEPT" >> $CONFIG_FILE
+    echo "iptables -A INPUT -p udp --dport $PORT_RANGE -j ACCEPT" >> $CONFIG_FILE
+    echo "iptables -t nat -A PREROUTING -p udp --dport $PORT_RANGE -j DNAT --to-destination :$TARGET_PORT" >> $CONFIG_FILE
+    echo "规则已添加到 $CONFIG_FILE"
+}
 
 # 查看规则
-iptables -L
-iptables -t nat -nL --line-numbers
+view_rules() {
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "当前规则配置:"
+        cat $CONFIG_FILE
+    else
+        echo "没有找到配置文件 $CONFIG_FILE"
+    fi
+}
+
+# 删除规则
+delete_rules() {
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "删除规则前的配置:"
+        cat $CONFIG_FILE
+        rm $CONFIG_FILE
+        echo "规则已从 $CONFIG_FILE 中删除"
+    else
+        echo "没有找到配置文件 $CONFIG_FILE"
+    fi
+}
+
+# 应用规则
+apply_rules() {
+    if [ -f "$CONFIG_FILE" ]; then
+        while read -r rule; do
+            eval "$rule"
+        done < $CONFIG_FILE
+        iptables-save > /etc/iptables/rules.v4
+        echo "规则已应用并保存"
+    else
+        echo "没有找到配置文件 $CONFIG_FILE"
+    fi
+}
+
+# 重启 iptables-persistent
+restart_persistent() {
+    if [ -x "$(command -v systemctl)" ]; then
+        systemctl restart netfilter-persistent
+    elif [ -x "$(command -v service)" ]; then
+        service netfilter-persistent restart
+    else
+        echo "无法重启 iptables-persistent，您需要手动重启服务"
+    fi
+}
+
+# 主菜单
+echo "请选择操作:"
+echo "1. 安装 iptables-persistent"
+echo "2. 添加规则"
+echo "3. 查看规则"
+echo "4. 删除规则"
+echo "5. 应用规则"
+echo "6. 重启 iptables-persistent"
+read -p "请输入选项 (1-6): " OPTION
+
+case $OPTION in
+    1) install_persistent ;;
+    2) add_rules ;;
+    3) view_rules ;;
+    4) delete_rules ;;
+    5) apply_rules ;;
+    6) restart_persistent ;;
+    *) echo "无效选项" ;;
+esac
