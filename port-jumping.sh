@@ -34,6 +34,7 @@ add_rules() {
         exit 1
     fi
 
+    # 添加规则到配置文件
     echo "iptables -A INPUT -p udp --dport $TARGET_PORT -j ACCEPT" >> $CONFIG_FILE
     echo "iptables -A INPUT -p udp --dport $PORT_RANGE -j ACCEPT" >> $CONFIG_FILE
     echo "iptables -t nat -A PREROUTING -p udp --dport $PORT_RANGE -j DNAT --to-destination :$TARGET_PORT" >> $CONFIG_FILE
@@ -53,8 +54,17 @@ view_rules() {
 # 删除规则
 delete_rules() {
     if [ -f "$CONFIG_FILE" ]; then
-        echo "删除规则前的配置:"
-        cat $CONFIG_FILE
+        echo "正在删除配置文件中的规则..."
+        
+        # 清除现有的 iptables 规则
+        while read -r rule; do
+            # 删除 NAT 规则
+            if echo "$rule" | grep -q "iptables -t nat -D PREROUTING"; then
+                eval "$rule"
+            fi
+        done < $CONFIG_FILE
+
+        # 清除规则文件
         rm $CONFIG_FILE
         echo "规则已从 $CONFIG_FILE 中删除"
     else
@@ -65,10 +75,18 @@ delete_rules() {
 # 应用规则
 apply_rules() {
     if [ -f "$CONFIG_FILE" ]; then
+        # 清除现有规则
+        iptables -F
+        iptables -t nat -F
+        
+        # 应用配置文件中的规则
         while read -r rule; do
             eval "$rule"
         done < $CONFIG_FILE
+        
+        # 保存规则
         iptables-save > /etc/iptables/rules.v4
+        
         echo "规则已应用并保存"
     else
         echo "没有找到配置文件 $CONFIG_FILE"
