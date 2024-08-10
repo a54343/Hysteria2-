@@ -21,8 +21,16 @@ fi
 # 清除现有的 iptables 规则
 iptables -F
 iptables -X
+iptables -t nat -F
+iptables -t nat -X
 
-# 设置默认策略
+# 删除现有的 NAT 转发规则
+iptables -t nat -D PREROUTING -p udp --dport $PORT_RANGE -j DNAT --to-destination :$TARGET_PORT 2>/dev/null
+
+# 删除现有的端口范围规则
+iptables -D INPUT -p udp --dport $PORT_RANGE -j ACCEPT 2>/dev/null
+
+# 设置新的 iptables 规则
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -p tcp --dport 22 -j ACCEPT
 iptables -A INPUT -p tcp --dport 80 -j ACCEPT
